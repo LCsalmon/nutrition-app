@@ -6,6 +6,7 @@ import { useAppStore } from './src/lib/store';
 import AuthScreen from './src/screens/AuthScreen';
 import OnboardingScreen from './src/screens/OnboardingScreen';
 import AppNavigator from './src/navigation';
+import { checkAndAdjustPlan } from './src/lib/planAdjustment';
 
 export default function App() {
   const session = useAppStore((s) => s.session);
@@ -54,7 +55,14 @@ export default function App() {
         .eq('user_id', session.user.id)
         .eq('is_active', true)
         .maybeSingle();
-      setActivePlan(planData ?? null);
+
+      if (planData && profileData) {
+        // 每次打开App时，检查方案是否满足评估周期（约12天），需要的话自动生成调整后的新方案
+        const latestPlan = await checkAndAdjustPlan(session.user.id, profileData, planData);
+        setActivePlan(latestPlan);
+      } else {
+        setActivePlan(planData ?? null);
+      }
 
       setPlanLoading(false);
     }

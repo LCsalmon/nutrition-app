@@ -6,10 +6,14 @@ import {
   ScrollView,
   RefreshControl,
   TouchableOpacity,
+  Modal,
+  TextInput,
+  Alert,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import { useAppStore } from '../lib/store';
+import { checkAndAdjustPlan } from '../lib/planAdjustment';
 import { FoodLog } from '../types';
 
 function ProgressBar({ value, max, color }: { value: number; max: number; color: string }) {
@@ -23,9 +27,45 @@ function ProgressBar({ value, max, color }: { value: number; max: number; color:
 
 export default function HomeScreen({ navigation }: any) {
   const session = useAppStore((s) => s.session);
+  const profile = useAppStore((s) => s.profile);
   const activePlan = useAppStore((s) => s.activePlan);
+  const setActivePlan = useAppStore((s) => s.setActivePlan);
   const [todayLogs, setTodayLogs] = useState<FoodLog[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [evaluating, setEvaluating] = useState(false);
+  const [weightModalVisible, setWeightModalVisible] = useState(false);
+  const [weightInput, setWeightInput] = useState('');
+  const [savingWeight, setSavingWeight] = useState(false);
+
+  async function handleSaveWeight() {
+    if (!session?.user?.id || !weightInput) return;
+    const weight = parseFloat(weightInput);
+    if (isNaN(weight) || weight <= 0) {
+      Alert.alert('提示', '请输入有效的体重数值');
+      return;
+    }
+    setSavingWeight(true);
+    const { error } = await supabase.from('body_metrics').insert({
+      user_id: session.user.id,
+      weight_kg: weight,
+      source: 'manual',
+    });
+    setSavingWeight(false);
+    if (error) {
+      Alert.alert('保存失败', error.message);
+    } else {
+      setWeightModalVisible(false);
+      setWeightInput('');
+    }
+  }
+
+  async function handleManualEvaluate() {
+    if (!session?.user?.id || !profile || !activePlan) return;
+    setEvaluating(true);
+    const updated = await checkAndAdjustPlan(session.user.id, profile, activePlan, true);
+    setActivePlan(updated);
+    setEvaluating(false);
+  }
 
   const fetchTodayLogs = useCallback(async () => {
     if (!session?.user?.id) return;
@@ -93,16 +133,60 @@ export default function HomeScreen({ navigation }: any) {
         <MacroItem label="脂肪" value={totals.fat} target={activePlan.fat_g} color="#F4B942" />
       </View>
 
-      <TouchableOpacity
-        style={styles.logButton}
-        onPress={() => navigation.navigate('LogFood')}
-      >
-        <Text style={styles.logButtonText}>+ 记录一餐</Text>
-      </TouchableOpacity>
+      <View style={styles.buttonRow}>
+        <TouchableOpacity
+          style={[styles.logButton, { flex: 1 }]}
+          onPress={() => navigation.navigate('LogFood')}
+        >
+          <Text style={styles.logButtonText}>+ 记录一餐</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.weightButton, { flex: 1 }]}
+          onPress={() => setWeightModalVisible(true)}
+        >
+          <Text style={styles.weightButtonText}>+ 记录体重</Text>
+        </TouchableOpacity>
+      </View>
+
+      <Modal visible={weightModalVisible} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>记录今日体重</Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="例如 58.5"
+              keyboardType="decimal-pad"
+              value={weightInput}
+              onChangeText={setWeightInput}
+              autoFocus
+            />
+            <View style={styles.modalButtonRow}>
+              <TouchableOpacity
+                style={styles.modalCancelButton}
+                onPress={() => setWeightModalVisible(false)}
+              >
+                <Text style={styles.modalCancelText}>取消</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalSaveButton}
+                onPress={handleSaveWeight}
+                disabled={savingWeight}
+              >
+                <Text style={styles.modalSaveText}>{savingWeight ? '保存中...' : '保存'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <View style={styles.explanationCard}>
         <Text style={styles.explanationTitle}>方案说明</Text>
         <Text style={styles.explanationText}>{activePlan.explanation}</Text>
+        <TouchableOpacity onPress={handleManualEvaluate} disabled={evaluating}>
+          <Text style={styles.evaluateLink}>
+            {evaluating ? '评估中...' : '立即重新评估我的方案 →'}
+          </Text>
+        </TouchableOpacity>
       </View>
 
       <Text style={styles.sectionTitle}>今日已记录</Text>
@@ -175,14 +259,63 @@ const styles = StyleSheet.create({
   macroLabel: { fontSize: 12, color: '#6B7C74', marginBottom: 4 },
   macroValue: { fontSize: 16, fontWeight: '700', color: '#1F2D26' },
   macroTarget: { fontSize: 12, fontWeight: '400', color: '#6B7C74' },
+  buttonRow: { flexDirection: 'row', gap: 10, marginBottom: 20 },
   logButton: {
     backgroundColor: '#2E7D5B',
     borderRadius: 14,
     paddingVertical: 15,
     alignItems: 'center',
-    marginBottom: 20,
   },
   logButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  weightButton: {
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    paddingVertical: 15,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#2E7D5B',
+  },
+  weightButtonText: { color: '#2E7D5B', fontSize: 16, fontWeight: '600' },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 20,
+    width: '80%',
+  },
+  modalTitle: { fontSize: 16, fontWeight: '700', color: '#1F2D26', marginBottom: 14 },
+  modalInput: {
+    backgroundColor: '#F4F8F4',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 16,
+    borderWidth: 1,
+    borderColor: '#E2E8E4',
+    marginBottom: 16,
+  },
+  modalButtonRow: { flexDirection: 'row', gap: 10 },
+  modalCancelButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+    backgroundColor: '#F4F8F4',
+  },
+  modalCancelText: { color: '#6B7C74', fontWeight: '600' },
+  modalSaveButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+    backgroundColor: '#2E7D5B',
+  },
+  modalSaveText: { color: '#fff', fontWeight: '600' },
   explanationCard: {
     backgroundColor: '#EAF3EC',
     borderRadius: 14,
@@ -191,6 +324,7 @@ const styles = StyleSheet.create({
   },
   explanationTitle: { fontSize: 14, fontWeight: '700', color: '#2E7D5B', marginBottom: 6 },
   explanationText: { fontSize: 13, color: '#3E4F46', lineHeight: 20 },
+  evaluateLink: { fontSize: 12, color: '#2E7D5B', fontWeight: '600', marginTop: 10 },
   sectionTitle: { fontSize: 16, fontWeight: '700', color: '#1F2D26', marginBottom: 10 },
   emptyText: { color: '#8A9990', fontSize: 13, marginBottom: 30 },
   logRow: {

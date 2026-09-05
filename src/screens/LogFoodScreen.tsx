@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { useAppStore } from '../lib/store';
+import { searchUsdaFoods } from '../lib/usdaApi';
 import { Food, MealType } from '../types';
 
 const MEAL_OPTIONS: { value: MealType; label: string }[] = [
@@ -27,6 +28,7 @@ export default function LogFoodScreen({ navigation }: any) {
   const [amount, setAmount] = useState('');
   const [mealType, setMealType] = useState<MealType>('lunch');
   const [saving, setSaving] = useState(false);
+  const [searching, setSearching] = useState(false);
 
   async function search(text: string) {
     setQuery(text);
@@ -34,17 +36,59 @@ export default function LogFoodScreen({ navigation }: any) {
       setResults([]);
       return;
     }
-    const { data } = await supabase
-      .from('foods')
-      .select('*')
-      .ilike('name', `%${text}%`)
-      .limit(20);
-    setResults(data ?? []);
+    setSearching(true);
+    // 本地库和 USDA 并行搜索，本地库优先展示（本地维护的常见食物+之前缓存过的USDA食物）
+    const [localResult, usdaResult] = await Promise.all([
+      supabase.from('foods').select('*').ilike('name', `%${text}%`).limit(20),
+      searchUsdaFoods(text, 15),
+    ]);
+    const localFoods = localResult.data ?? [];
+    const localNames = new Set(localFoods.map((f) => f.name.toLowerCase()));
+    // 去重：如果本地库已经有同名食物（说明之前缓存过），就不重复展示 USDA 的那条
+    const dedupedUsda = usdaResult.filter((f) => !localNames.has(f.name.toLowerCase()));
+    setResults([...localFoods, ...dedupedUsda]);
+    setSearching(false);
   }
 
   function pickFood(food: Food) {
     setSelectedFood(food);
     setAmount(food.common_portion_g ? String(food.common_portion_g) : '100');
+  }
+
+  // USDA 食物首次被选中记录时，写入本地 foods 表缓存一份，
+  // 这样以后同一份用户/其他用户搜索会直接命中本地库，且能满足 food_logs 外键约束
+  async function resolveLocalFoodId(food: Food): Promise<string | null> {
+    if (!food.id.startsWith('usda-')) return food.id;
+
+    const { data: existing } = await supabase
+      .from('foods')
+      .select('id')
+      .eq('name', food.name)
+      .eq('source', 'usda')
+      .maybeSingle();
+    if (existing) return existing.id;
+
+    const { data: inserted, error } = await supabase
+      .from('foods')
+      .insert({
+        name: food.name,
+        category: food.category,
+        calories_kcal_per_100g: food.calories_kcal_per_100g,
+        protein_g_per_100g: food.protein_g_per_100g,
+        carbs_g_per_100g: food.carbs_g_per_100g,
+        fat_g_per_100g: food.fat_g_per_100g,
+        fiber_g_per_100g: food.fiber_g_per_100g,
+        source: 'usda',
+        created_by: session?.user?.id,
+      })
+      .select('id')
+      .single();
+
+    if (error) {
+      console.warn('缓存USDA食物失败', error.message);
+      return null;
+    }
+    return inserted.id;
   }
 
   async function handleSave() {
@@ -60,9 +104,12 @@ export default function LogFoodScreen({ navigation }: any) {
 
     const ratio = grams / 100;
     setSaving(true);
+
+    const foodId = await resolveLocalFoodId(selectedFood);
+
     const { error } = await supabase.from('food_logs').insert({
       user_id: session.user.id,
-      food_id: selectedFood.id,
+      food_id: foodId,
       custom_food_name: selectedFood.name,
       meal_type: mealType,
       amount_g: grams,
@@ -95,14 +142,17 @@ export default function LogFoodScreen({ navigation }: any) {
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
             <TouchableOpacity style={styles.foodRow} onPress={() => pickFood(item)}>
-              <Text style={styles.foodName}>{item.name}</Text>
-              <Text style={styles.foodMeta}>
-                {item.calories_kcal_per_100g} kcal/100g
-              </Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.foodName}>{item.name}</Text>
+                <Text style={styles.foodMeta}>
+                  {Math.round(item.calories_kcal_per_100g)} kcal/100g
+                  {item.id.startsWith('usda-') ? ' · USDA' : ''}
+                </Text>
+              </View>
             </TouchableOpacity>
           )}
           ListEmptyComponent={
-            query.length > 0 ? (
+            query.length > 0 && !searching ? (
               <Text style={styles.emptyText}>没有找到匹配的食物，可尝试其他关键词</Text>
             ) : null
           }
