@@ -1,0 +1,27 @@
+{
+  "expo": {
+    "name": "食愈",
+    "slug": "nutrition-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "backgroundColor": "#F4F8F4",
+      "resizeMode": "contain"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.yourcompany.nutritionapp"
+    },
+    "android": {
+      "package": "com.yourcompany.nutritionapp",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#F4F8F4"
+      }
+    }
+  }
+}
