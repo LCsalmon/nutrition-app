@@ -22,6 +22,7 @@ const MEAL_OPTIONS: { value: MealType; label: string }[] = [
 
 export default function LogFoodScreen({ navigation }: any) {
   const session = useAppStore((s) => s.session);
+  const activeMemberId = useAppStore((s) => s.activeMemberId);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Food[]>([]);
   const [selectedFood, setSelectedFood] = useState<Food | null>(null);
@@ -109,6 +110,7 @@ export default function LogFoodScreen({ navigation }: any) {
 
     const { error } = await supabase.from('food_logs').insert({
       user_id: session.user.id,
+      family_member_id: activeMemberId,
       food_id: foodId,
       custom_food_name: selectedFood.name,
       meal_type: mealType,

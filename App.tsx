@@ -14,6 +14,8 @@ export default function App() {
   const activePlan = useAppStore((s) => s.activePlan);
   const setActivePlan = useAppStore((s) => s.setActivePlan);
   const setProfile = useAppStore((s) => s.setProfile);
+  const setFamilyMembers = useAppStore((s) => s.setFamilyMembers);
+  const activeMemberId = useAppStore((s) => s.activeMemberId);
 
   const [authLoading, setAuthLoading] = useState(true);
   const [planLoading, setPlanLoading] = useState(false);
@@ -32,12 +34,13 @@ export default function App() {
     return () => listener.subscription.unsubscribe();
   }, []);
 
-  // 登录后加载资料 + 当前生效的营养方案
+  // 登录后加载资料 + 家庭成员列表 + 当前生效的营养方案（本人）
   useEffect(() => {
     async function loadUserData() {
       if (!session?.user?.id) {
         setActivePlan(null);
         setProfile(null);
+        setFamilyMembers([]);
         return;
       }
       setPlanLoading(true);
@@ -49,16 +52,25 @@ export default function App() {
         .single();
       setProfile(profileData ?? null);
 
+      const { data: membersData } = await supabase
+        .from('family_members')
+        .select('*')
+        .eq('owner_id', session.user.id)
+        .order('created_at', { ascending: true });
+      setFamilyMembers(membersData ?? []);
+
+      // 应用启动时默认查看"本人"的方案（activeMemberId 初始为 null）
       const { data: planData } = await supabase
         .from('nutrition_plans')
         .select('*')
         .eq('user_id', session.user.id)
         .eq('is_active', true)
+        .is('family_member_id', null)
         .maybeSingle();
 
       if (planData && profileData) {
         // 每次打开App时，检查方案是否满足评估周期（约12天），需要的话自动生成调整后的新方案
-        const latestPlan = await checkAndAdjustPlan(session.user.id, profileData, planData);
+        const latestPlan = await checkAndAdjustPlan(session.user.id, profileData, planData, null);
         setActivePlan(latestPlan);
       } else {
         setActivePlan(planData ?? null);
@@ -94,19 +106,21 @@ export default function App() {
     );
   }
 
-  if (!activePlan) {
+  // 只有"本人"从未完成过 onboarding（没有任何方案）时才强制走引导流程
+  // 家庭成员没有方案的情况由首页自行提示，不阻塞整个App
+  if (!activePlan && activeMemberId === null) {
     return (
       <>
         <StatusBar style="dark" />
         <OnboardingScreen
           onDone={async () => {
-            // 方案生成完成后重新拉取
             if (!session.user.id) return;
             const { data } = await supabase
               .from('nutrition_plans')
               .select('*')
               .eq('user_id', session.user.id)
               .eq('is_active', true)
+              .is('family_member_id', null)
               .maybeSingle();
             setActivePlan(data ?? null);
           }}

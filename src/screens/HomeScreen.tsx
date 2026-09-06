@@ -17,7 +17,6 @@ import { checkAndAdjustPlan } from '../lib/planAdjustment';
 import {
   calculateLoggingStreak,
   detectNudges,
-  getStreakBadges,
   requestNotificationPermission,
   scheduleDailyReminder,
   Nudge,
@@ -39,6 +38,9 @@ export default function HomeScreen({ navigation }: any) {
   const profile = useAppStore((s) => s.profile);
   const activePlan = useAppStore((s) => s.activePlan);
   const setActivePlan = useAppStore((s) => s.setActivePlan);
+  const familyMembers = useAppStore((s) => s.familyMembers);
+  const activeMemberId = useAppStore((s) => s.activeMemberId);
+
   const [todayLogs, setTodayLogs] = useState<FoodLog[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [evaluating, setEvaluating] = useState(false);
@@ -48,6 +50,11 @@ export default function HomeScreen({ navigation }: any) {
   const [streak, setStreak] = useState(0);
   const [nudges, setNudges] = useState<Nudge[]>([]);
   const [syncingWearable, setSyncingWearable] = useState(false);
+
+  const viewingLabel =
+    activeMemberId === null
+      ? '本人'
+      : familyMembers.find((m) => m.id === activeMemberId)?.name ?? '家庭成员';
 
   async function handleSyncWearable() {
     if (!session?.user?.id) return;
@@ -76,6 +83,7 @@ export default function HomeScreen({ navigation }: any) {
     setSavingWeight(true);
     const { error } = await supabase.from('body_metrics').insert({
       user_id: session.user.id,
+      family_member_id: activeMemberId,
       weight_kg: weight,
       source: 'manual',
     });
@@ -91,7 +99,13 @@ export default function HomeScreen({ navigation }: any) {
   async function handleManualEvaluate() {
     if (!session?.user?.id || !profile || !activePlan) return;
     setEvaluating(true);
-    const updated = await checkAndAdjustPlan(session.user.id, profile, activePlan, true);
+    const updated = await checkAndAdjustPlan(
+      session.user.id,
+      profile,
+      activePlan,
+      activeMemberId,
+      true
+    );
     setActivePlan(updated);
     setEvaluating(false);
   }
@@ -99,13 +113,17 @@ export default function HomeScreen({ navigation }: any) {
   const fetchTodayLogs = useCallback(async () => {
     if (!session?.user?.id) return;
     const today = new Date().toISOString().slice(0, 10);
-    const { data } = await supabase
+    let query = supabase
       .from('food_logs')
       .select('*')
       .eq('user_id', session.user.id)
       .eq('log_date', today);
+    query = activeMemberId
+      ? query.eq('family_member_id', activeMemberId)
+      : query.is('family_member_id', null);
+    const { data } = await query;
     setTodayLogs(data ?? []);
-  }, [session]);
+  }, [session, activeMemberId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -143,7 +161,10 @@ export default function HomeScreen({ navigation }: any) {
   if (!activePlan) {
     return (
       <View style={styles.center}>
-        <Text>还没有生成方案</Text>
+        <Text>{viewingLabel} 还没有生成方案</Text>
+        <TouchableOpacity onPress={() => navigation.navigate('Profile')} style={{ marginTop: 12 }}>
+          <Text style={{ color: '#2E7D5B', fontWeight: '600' }}>去"我的"页面查看 →</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -153,7 +174,17 @@ export default function HomeScreen({ navigation }: any) {
       style={styles.container}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
     >
-      <Text style={styles.greeting}>今日概览</Text>
+      <View style={styles.headerRow}>
+        <Text style={styles.greeting}>今日概览</Text>
+        {familyMembers.length > 0 && (
+          <TouchableOpacity
+            style={styles.viewingChip}
+            onPress={() => navigation.navigate('Profile')}
+          >
+            <Text style={styles.viewingChipText}>正在查看：{viewingLabel} ⌄</Text>
+          </TouchableOpacity>
+        )}
+      </View>
 
       {streak > 0 && (
         <View style={styles.streakBadge}>
@@ -213,7 +244,7 @@ export default function HomeScreen({ navigation }: any) {
       <Modal visible={weightModalVisible} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>记录今日体重</Text>
+            <Text style={styles.modalTitle}>记录{viewingLabel}今日体重</Text>
             <TextInput
               style={styles.modalInput}
               placeholder="例如 58.5"
@@ -249,21 +280,6 @@ export default function HomeScreen({ navigation }: any) {
             {evaluating ? '评估中...' : '立即重新评估我的方案 →'}
           </Text>
         </TouchableOpacity>
-      </View>
-
-      <Text style={styles.sectionTitle}>成就徽章</Text>
-      <View style={styles.badgeRow}>
-        {getStreakBadges(streak).map((badge) => (
-          <View
-            key={badge.id}
-            style={[styles.badgeChip, badge.earned && styles.badgeChipEarned]}
-          >
-            <Text style={[styles.badgeText, badge.earned && styles.badgeTextEarned]}>
-              {badge.earned ? '🏅 ' : '🔒 '}
-              {badge.label}
-            </Text>
-          </View>
-        ))}
       </View>
 
       <Text style={styles.sectionTitle}>今日已记录</Text>
@@ -309,7 +325,22 @@ function MacroItem({
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F4F8F4', padding: 20 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  greeting: { fontSize: 22, fontWeight: '700', color: '#1F2D26', marginBottom: 16 },
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  greeting: { fontSize: 22, fontWeight: '700', color: '#1F2D26' },
+  viewingChip: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: '#E2E8E4',
+  },
+  viewingChipText: { fontSize: 12, color: '#2E7D5B', fontWeight: '600' },
   streakBadge: {
     backgroundColor: '#FFF3E0',
     borderRadius: 12,
@@ -421,16 +452,6 @@ const styles = StyleSheet.create({
   explanationText: { fontSize: 13, color: '#3E4F46', lineHeight: 20 },
   evaluateLink: { fontSize: 12, color: '#2E7D5B', fontWeight: '600', marginTop: 10 },
   sectionTitle: { fontSize: 16, fontWeight: '700', color: '#1F2D26', marginBottom: 10 },
-  badgeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 24 },
-  badgeChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 16,
-    backgroundColor: '#F0F0F0',
-  },
-  badgeChipEarned: { backgroundColor: '#FFF3E0' },
-  badgeText: { fontSize: 12, color: '#9AA39D' },
-  badgeTextEarned: { color: '#B5651D', fontWeight: '600' },
   emptyText: { color: '#8A9990', fontSize: 13, marginBottom: 30 },
   logRow: {
     backgroundColor: '#fff',

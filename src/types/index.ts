@@ -31,9 +31,25 @@ export interface Profile {
   region?: string;
 }
 
+export interface FamilyMember {
+  id: string;
+  owner_id: string;
+  name: string;
+  relation?: string;
+  gender?: Gender;
+  birth_date?: string;
+  height_cm?: number;
+  weight_kg?: number;
+  activity_level?: ActivityLevel;
+  goal?: Goal;
+  allergies?: string[];
+  dietary_preference?: string;
+}
+
 export interface NutritionPlan {
   id: string;
   user_id: string;
+  family_member_id?: string | null;
   daily_calories_kcal: number;
   protein_g: number;
   carbs_g: number;
@@ -62,6 +78,7 @@ export type MealType = 'breakfast' | 'lunch' | 'dinner' | 'snack';
 export interface FoodLog {
   id: string;
   user_id: string;
+  family_member_id?: string | null;
   food_id?: string;
   custom_food_name?: string;
   meal_type: MealType;

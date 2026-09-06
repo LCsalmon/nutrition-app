@@ -120,6 +120,7 @@ export async function checkAndAdjustPlan(
   userId: string,
   profile: Profile,
   activePlan: NutritionPlan,
+  memberId: string | null = null,
   force = false
 ): Promise<NutritionPlan> {
   const planAge = daysBetween(new Date(activePlan.created_at), new Date());
@@ -131,21 +132,27 @@ export async function checkAndAdjustPlan(
   since.setDate(since.getDate() - LOOKBACK_DAYS);
   const sinceStr = since.toISOString().slice(0, 10);
 
-  const { data: logs } = await supabase
+  let logsQuery = supabase
     .from('food_logs')
     .select('log_date')
     .eq('user_id', userId)
     .gte('log_date', sinceStr);
+  logsQuery = memberId ? logsQuery.eq('family_member_id', memberId) : logsQuery.is('family_member_id', null);
+  const { data: logs } = await logsQuery;
 
   const loggedDaysCount = new Set((logs ?? []).map((l) => l.log_date)).size;
 
-  const { data: metrics } = await supabase
+  let metricsQuery = supabase
     .from('body_metrics')
     .select('weight_kg, recorded_at')
     .eq('user_id', userId)
     .not('weight_kg', 'is', null)
     .gte('recorded_at', since.toISOString())
     .order('recorded_at', { ascending: true });
+  metricsQuery = memberId
+    ? metricsQuery.eq('family_member_id', memberId)
+    : metricsQuery.is('family_member_id', null);
+  const { data: metrics } = await metricsQuery;
 
   let weightChangeKg: number | null = null;
   if (metrics && metrics.length >= 2) {
@@ -176,6 +183,7 @@ export async function checkAndAdjustPlan(
     .from('nutrition_plans')
     .insert({
       user_id: userId,
+      family_member_id: memberId,
       daily_calories_kcal: newCalories,
       protein_g: newProtein,
       carbs_g: newCarbs,
