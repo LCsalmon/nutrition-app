@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { NutritionPlan, Profile } from '../types';
+import { generateInitialPlan } from './nutritionEngine';
 
 const EVALUATION_INTERVAL_DAYS = 12; // 约1-2周评估一次
 const LOOKBACK_DAYS = 14; // 评估时回看多少天的数据
@@ -116,6 +117,47 @@ function evaluate(
  * 如果需要，会读取近14天的打卡与体重数据，生成新的方案版本（写入nutrition_plans，旧版本置为非active）
  * 返回最新的active方案；如果本次不需要评估，返回原方案
  */
+/**
+ * 当用户的身高/体重/活动水平/目标等基础信息被编辑更新时，
+ * 用最新信息重新生成一份方案（而不是等12天自动评估），让摄入目标立刻反映最新情况
+ */
+export async function regeneratePlan(
+  userId: string,
+  memberId: string | null,
+  updatedProfile: Profile,
+  reasonPrefix = '你更新了个人信息，'
+): Promise<NutritionPlan | null> {
+  const plan = generateInitialPlan(updatedProfile);
+  plan.explanation = reasonPrefix + plan.explanation;
+
+  // 把当前该成员的active方案置为非active
+  let deactivateQuery = supabase
+    .from('nutrition_plans')
+    .update({ is_active: false })
+    .eq('user_id', userId)
+    .eq('is_active', true);
+  deactivateQuery = memberId
+    ? deactivateQuery.eq('family_member_id', memberId)
+    : deactivateQuery.is('family_member_id', null);
+  await deactivateQuery;
+
+  const { data: newPlan, error } = await supabase
+    .from('nutrition_plans')
+    .insert({
+      user_id: userId,
+      family_member_id: memberId,
+      ...plan,
+    })
+    .select('*')
+    .single();
+
+  if (error) {
+    console.warn('重新生成方案失败', error.message);
+    return null;
+  }
+  return newPlan;
+}
+
 export async function checkAndAdjustPlan(
   userId: string,
   profile: Profile,

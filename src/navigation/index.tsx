@@ -5,6 +5,8 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import HomeScreen from '../screens/HomeScreen';
 import LogFoodScreen from '../screens/LogFoodScreen';
 import ProfileScreen from '../screens/ProfileScreen';
+import MemberSwitcherModal from '../components/MemberSwitcherModal';
+import { useAppStore } from '../lib/store';
 
 export type RootStackParamList = {
   Home: undefined;
@@ -14,6 +16,15 @@ export type RootStackParamList = {
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
+function HeaderMemberButton() {
+  const setSwitcherVisible = useAppStore((s) => s.setSwitcherVisible);
+  return (
+    <TouchableOpacity onPress={() => setSwitcherVisible(true)}>
+      <Text style={{ fontSize: 22 }}>👤</Text>
+    </TouchableOpacity>
+  );
+}
+
 export default function AppNavigator() {
   return (
     <NavigationContainer>
@@ -21,14 +32,10 @@ export default function AppNavigator() {
         <Stack.Screen
           name="Home"
           component={HomeScreen}
-          options={({ navigation }) => ({
+          options={{
             title: '食愈',
-            headerRight: () => (
-              <TouchableOpacity onPress={() => navigation.navigate('Profile')}>
-                <Text style={{ fontSize: 22 }}>👤</Text>
-              </TouchableOpacity>
-            ),
-          })}
+            headerRight: () => <HeaderMemberButton />,
+          }}
         />
         <Stack.Screen
           name="LogFood"
@@ -37,6 +44,8 @@ export default function AppNavigator() {
         />
         <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: '我的' }} />
       </Stack.Navigator>
+      {/* 挂载在导航容器顶层，任何页面点右上角👤都能唤起，切换后自动生效 */}
+      <MemberSwitcherModal />
     </NavigationContainer>
   );
 }

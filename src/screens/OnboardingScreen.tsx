@@ -12,6 +12,7 @@ import {
 import { supabase } from '../lib/supabase';
 import { useAppStore } from '../lib/store';
 import { generateInitialPlan } from '../lib/nutritionEngine';
+import { calculateBmi } from '../lib/bmiUtils';
 import { ActivityLevel, Gender, Goal } from '../types';
 
 const GENDER_OPTIONS: { value: Gender; label: string }[] = [
@@ -131,6 +132,10 @@ export default function OnboardingScreen({ onDone }: { onDone: () => void }) {
   const [region, setRegion] = useState('');
   const [loading, setLoading] = useState(false);
 
+  const heightNum = parseFloat(height);
+  const weightNum = parseFloat(weight);
+  const bmiResult = heightNum > 0 && weightNum > 0 ? calculateBmi(weightNum, heightNum) : null;
+
   function toggleAllergy(item: string) {
     setAllergies((prev) =>
       prev.includes(item) ? prev.filter((a) => a !== item) : [...prev, item]
@@ -220,6 +225,20 @@ export default function OnboardingScreen({ onDone }: { onDone: () => void }) {
         onChangeText={setWeight}
       />
 
+      {bmiResult && (
+        <View style={[styles.bmiCard, { borderColor: bmiResult.color }]}>
+          <Text style={styles.bmiValue}>
+            BMI {bmiResult.bmi}{' '}
+            <Text style={[styles.bmiLabel, { color: bmiResult.color }]}>· {bmiResult.label}</Text>
+          </Text>
+          <Text style={styles.bmiHint}>
+            {bmiResult.inHealthyRange
+              ? '在健康范围内，继续保持！'
+              : '仅供参考，不代表医学诊断，具体请结合实际情况或咨询专业人士。'}
+          </Text>
+        </View>
+      )}
+
       <Text style={styles.label}>日常活动水平</Text>
       <OptionRow options={ACTIVITY_OPTIONS} selected={activityLevel} onSelect={setActivityLevel} />
 
@@ -299,6 +318,16 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     fontWeight: '600',
   },
+  bmiCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    borderWidth: 1.5,
+    padding: 14,
+    marginTop: 14,
+  },
+  bmiValue: { fontSize: 16, fontWeight: '700', color: '#1F2D26' },
+  bmiLabel: { fontSize: 14, fontWeight: '700' },
+  bmiHint: { fontSize: 12, color: '#6B7C74', marginTop: 4, lineHeight: 17 },
   input: {
     backgroundColor: '#fff',
     borderRadius: 12,

@@ -22,7 +22,6 @@ import {
   Nudge,
 } from '../lib/behaviorSupport';
 import { FoodLog } from '../types';
-import { requestWearablePermissions, syncWearableData } from '../lib/wearableSync';
 
 function ProgressBar({ value, max, color }: { value: number; max: number; color: string }) {
   const pct = Math.min(value / max, 1) * 100;
@@ -40,38 +39,25 @@ export default function HomeScreen({ navigation }: any) {
   const setActivePlan = useAppStore((s) => s.setActivePlan);
   const familyMembers = useAppStore((s) => s.familyMembers);
   const activeMemberId = useAppStore((s) => s.activeMemberId);
+  const setSwitcherVisible = useAppStore((s) => s.setSwitcherVisible);
 
   const [todayLogs, setTodayLogs] = useState<FoodLog[]>([]);
+  const [caloriesBurnedToday, setCaloriesBurnedToday] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [evaluating, setEvaluating] = useState(false);
   const [weightModalVisible, setWeightModalVisible] = useState(false);
   const [weightInput, setWeightInput] = useState('');
   const [savingWeight, setSavingWeight] = useState(false);
+  const [burnedModalVisible, setBurnedModalVisible] = useState(false);
+  const [burnedInput, setBurnedInput] = useState('');
+  const [savingBurned, setSavingBurned] = useState(false);
   const [streak, setStreak] = useState(0);
   const [nudges, setNudges] = useState<Nudge[]>([]);
-  const [syncingWearable, setSyncingWearable] = useState(false);
 
   const viewingLabel =
     activeMemberId === null
       ? '本人'
       : familyMembers.find((m) => m.id === activeMemberId)?.name ?? '家庭成员';
-
-  async function handleSyncWearable() {
-    if (!session?.user?.id) return;
-    setSyncingWearable(true);
-    const granted = await requestWearablePermissions();
-    if (!granted) {
-      Alert.alert(
-        '暂时无法同步',
-        '可穿戴设备数据接入需要自定义开发版本才能使用（当前在 Expo Go 中运行，此功能暂不可用），详见 README 说明。'
-      );
-      setSyncingWearable(false);
-      return;
-    }
-    const count = await syncWearableData(session.user.id);
-    setSyncingWearable(false);
-    Alert.alert('同步完成', `已同步 ${count} 条体重记录`);
-  }
 
   async function handleSaveWeight() {
     if (!session?.user?.id || !weightInput) return;
@@ -93,6 +79,30 @@ export default function HomeScreen({ navigation }: any) {
     } else {
       setWeightModalVisible(false);
       setWeightInput('');
+    }
+  }
+
+  async function handleSaveBurned() {
+    if (!session?.user?.id || !burnedInput) return;
+    const kcal = parseFloat(burnedInput);
+    if (isNaN(kcal) || kcal < 0) {
+      Alert.alert('提示', '请输入有效的数值');
+      return;
+    }
+    setSavingBurned(true);
+    const { error } = await supabase.from('body_metrics').insert({
+      user_id: session.user.id,
+      family_member_id: activeMemberId,
+      active_calories_kcal: kcal,
+      source: 'manual',
+    });
+    setSavingBurned(false);
+    if (error) {
+      Alert.alert('保存失败', error.message);
+    } else {
+      setBurnedModalVisible(false);
+      setBurnedInput('');
+      fetchCaloriesBurned();
     }
   }
 
@@ -125,14 +135,33 @@ export default function HomeScreen({ navigation }: any) {
     setTodayLogs(data ?? []);
   }, [session, activeMemberId]);
 
+  const fetchCaloriesBurned = useCallback(async () => {
+    if (!session?.user?.id) return;
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    let query = supabase
+      .from('body_metrics')
+      .select('active_calories_kcal')
+      .eq('user_id', session.user.id)
+      .not('active_calories_kcal', 'is', null)
+      .gte('recorded_at', startOfDay.toISOString());
+    query = activeMemberId
+      ? query.eq('family_member_id', activeMemberId)
+      : query.is('family_member_id', null);
+    const { data } = await query;
+    const total = (data ?? []).reduce((sum, r) => sum + (r.active_calories_kcal || 0), 0);
+    setCaloriesBurnedToday(total);
+  }, [session, activeMemberId]);
+
   useFocusEffect(
     useCallback(() => {
       fetchTodayLogs();
+      fetchCaloriesBurned();
       if (session?.user?.id) {
         calculateLoggingStreak(session.user.id).then(setStreak);
         detectNudges(session.user.id).then(setNudges);
       }
-    }, [fetchTodayLogs, session])
+    }, [fetchTodayLogs, fetchCaloriesBurned, session])
   );
 
   // 首次进入首页时请求通知权限并设置每日提醒（用户可在系统设置里随时关闭）
@@ -144,7 +173,7 @@ export default function HomeScreen({ navigation }: any) {
 
   async function onRefresh() {
     setRefreshing(true);
-    await fetchTodayLogs();
+    await Promise.all([fetchTodayLogs(), fetchCaloriesBurned()]);
     setRefreshing(false);
   }
 
@@ -179,7 +208,7 @@ export default function HomeScreen({ navigation }: any) {
         {familyMembers.length > 0 && (
           <TouchableOpacity
             style={styles.viewingChip}
-            onPress={() => navigation.navigate('Profile')}
+            onPress={() => setSwitcherVisible(true)}
           >
             <Text style={styles.viewingChipText}>正在查看：{viewingLabel} ⌄</Text>
           </TouchableOpacity>
@@ -208,6 +237,14 @@ export default function HomeScreen({ navigation }: any) {
           max={activePlan.daily_calories_kcal}
           color="#2E7D5B"
         />
+        <View style={styles.burnedRow}>
+          <Text style={styles.burnedText}>
+            🔥 今日已消耗 {Math.round(caloriesBurnedToday)} kcal
+          </Text>
+          <TouchableOpacity onPress={() => setBurnedModalVisible(true)}>
+            <Text style={styles.burnedAddLink}>+ 记录</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <View style={styles.macroRow}>
@@ -230,16 +267,6 @@ export default function HomeScreen({ navigation }: any) {
           <Text style={styles.weightButtonText}>+ 记录体重</Text>
         </TouchableOpacity>
       </View>
-
-      <TouchableOpacity
-        style={styles.wearableSyncLink}
-        onPress={handleSyncWearable}
-        disabled={syncingWearable}
-      >
-        <Text style={styles.wearableSyncText}>
-          {syncingWearable ? '同步中...' : '⌚ 从 Apple Health / Health Connect 同步数据'}
-        </Text>
-      </TouchableOpacity>
 
       <Modal visible={weightModalVisible} transparent animationType="fade">
         <View style={styles.modalOverlay}>
@@ -266,6 +293,37 @@ export default function HomeScreen({ navigation }: any) {
                 disabled={savingWeight}
               >
                 <Text style={styles.modalSaveText}>{savingWeight ? '保存中...' : '保存'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={burnedModalVisible} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>记录已消耗的卡路里</Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="例如 300"
+              keyboardType="decimal-pad"
+              value={burnedInput}
+              onChangeText={setBurnedInput}
+              autoFocus
+            />
+            <View style={styles.modalButtonRow}>
+              <TouchableOpacity
+                style={styles.modalCancelButton}
+                onPress={() => setBurnedModalVisible(false)}
+              >
+                <Text style={styles.modalCancelText}>取消</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalSaveButton}
+                onPress={handleSaveBurned}
+                disabled={savingBurned}
+              >
+                <Text style={styles.modalSaveText}>{savingBurned ? '保存中...' : '保存'}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -373,6 +431,14 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   progressFill: { height: 8, borderRadius: 4 },
+  burnedRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 14,
+  },
+  burnedText: { fontSize: 13, color: '#B5651D', fontWeight: '600' },
+  burnedAddLink: { fontSize: 12, color: '#2E7D5B', fontWeight: '600' },
   macroRow: { flexDirection: 'row', gap: 10, marginBottom: 16 },
   macroItem: {
     flex: 1,
@@ -400,8 +466,6 @@ const styles = StyleSheet.create({
     borderColor: '#2E7D5B',
   },
   weightButtonText: { color: '#2E7D5B', fontSize: 16, fontWeight: '600' },
-  wearableSyncLink: { alignItems: 'center', marginBottom: 20 },
-  wearableSyncText: { fontSize: 13, color: '#6B7C74' },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.4)',

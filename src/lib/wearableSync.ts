@@ -21,6 +21,7 @@ import { supabase } from './supabase';
 
 export type SyncedMetric = {
   weight_kg?: number;
+  active_calories_kcal?: number;
   steps?: number;
   recorded_at: string;
 };
@@ -61,10 +62,27 @@ async function fetchIosData(sinceISO: string): Promise<SyncedMetric[]> {
       });
     });
 
-    return weightSamples.map((s) => ({
+    const activeEnergySamples = await new Promise<any[]>((resolve) => {
+      AppleHealthKit.getActiveEnergyBurned(options, (err: string, results: any[]) => {
+        resolve(err ? [] : results);
+      });
+    });
+
+    const weightMetrics: SyncedMetric[] = weightSamples.map((s) => ({
       weight_kg: s.value,
       recorded_at: s.startDate,
     }));
+
+    // 把当天所有的活动消耗样本汇总成一条记录
+    if (activeEnergySamples.length > 0) {
+      const totalBurned = activeEnergySamples.reduce((sum, s) => sum + (s.value ?? 0), 0);
+      weightMetrics.push({
+        active_calories_kcal: totalBurned,
+        recorded_at: new Date().toISOString(),
+      });
+    }
+
+    return weightMetrics;
   } catch (err) {
     console.warn('读取 HealthKit 数据失败', err);
     return [];
@@ -95,16 +113,26 @@ async function requestAndroidPermissions(): Promise<boolean> {
 async function fetchAndroidData(sinceISO: string): Promise<SyncedMetric[]> {
   try {
     const { readRecords } = require('react-native-health-connect');
-    const result = await readRecords('Weight', {
-      timeRangeFilter: {
-        operator: 'after',
-        startTime: sinceISO,
-      },
+    const weightResult = await readRecords('Weight', {
+      timeRangeFilter: { operator: 'after', startTime: sinceISO },
     });
-    return (result.records ?? []).map((r: any) => ({
+    const metrics: SyncedMetric[] = (weightResult.records ?? []).map((r: any) => ({
       weight_kg: r.weight?.inKilograms,
       recorded_at: r.time,
     }));
+
+    const caloriesResult = await readRecords('ActiveCaloriesBurned', {
+      timeRangeFilter: { operator: 'after', startTime: sinceISO },
+    });
+    const totalBurned = (caloriesResult.records ?? []).reduce(
+      (sum: number, r: any) => sum + (r.energy?.inKilocalories ?? 0),
+      0
+    );
+    if (totalBurned > 0) {
+      metrics.push({ active_calories_kcal: totalBurned, recorded_at: new Date().toISOString() });
+    }
+
+    return metrics;
   } catch (err) {
     console.warn('读取 Health Connect 数据失败', err);
     return [];
@@ -143,10 +171,11 @@ export async function syncWearableData(userId: string, sinceDays = 30): Promise<
   if (metrics.length === 0) return 0;
 
   const rows = metrics
-    .filter((m) => m.weight_kg)
+    .filter((m) => m.weight_kg || m.active_calories_kcal)
     .map((m) => ({
       user_id: userId,
       weight_kg: m.weight_kg,
+      active_calories_kcal: m.active_calories_kcal,
       recorded_at: m.recorded_at,
       source: Platform.OS === 'ios' ? 'apple_health' : 'google_fit',
     }));

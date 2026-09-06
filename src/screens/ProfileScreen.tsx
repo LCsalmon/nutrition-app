@@ -2,168 +2,21 @@ import React, { useCallback, useState } from 'react';
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   StyleSheet,
   ScrollView,
   Alert,
   Modal,
-  ActivityIndicator,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import { useAppStore } from '../lib/store';
-import { generateInitialPlan } from '../lib/nutritionEngine';
+import { regeneratePlan } from '../lib/planAdjustment';
 import { calculateLoggingStreak, getStreakBadges } from '../lib/behaviorSupport';
-import { ActivityLevel, FamilyMember, Gender, Goal, Profile } from '../types';
-
-const GENDER_OPTIONS: { value: Gender; label: string }[] = [
-  { value: 'female', label: '女' },
-  { value: 'male', label: '男' },
-];
-
-const ACTIVITY_OPTIONS: { value: ActivityLevel; label: string }[] = [
-  { value: 'sedentary', label: '久坐少动' },
-  { value: 'light', label: '轻度运动' },
-  { value: 'moderate', label: '中度运动' },
-  { value: 'active', label: '高强度运动' },
-  { value: 'very_active', label: '体力劳动/专业训练' },
-];
-
-const GOAL_OPTIONS: { value: Goal; label: string }[] = [
-  { value: 'lose_weight', label: '减脂塑形' },
-  { value: 'gain_muscle', label: '增肌' },
-  { value: 'maintain', label: '维持体重' },
-  { value: 'blood_sugar_control', label: '控糖' },
-  { value: 'pregnancy', label: '孕期营养' },
-  { value: 'general_wellness', label: '日常养生' },
-];
-
-function Chip<T extends string>({
-  options,
-  selected,
-  onSelect,
-}: {
-  options: { value: T; label: string }[];
-  selected: T | undefined;
-  onSelect: (v: T) => void;
-}) {
-  return (
-    <View style={styles.chipRow}>
-      {options.map((opt) => (
-        <TouchableOpacity
-          key={opt.value}
-          style={[styles.chip, selected === opt.value && styles.chipSelected]}
-          onPress={() => onSelect(opt.value)}
-        >
-          <Text style={[styles.chipText, selected === opt.value && styles.chipTextSelected]}>
-            {opt.label}
-          </Text>
-        </TouchableOpacity>
-      ))}
-    </View>
-  );
-}
-
-// 共用的成员信息表单（用于编辑本人资料 / 新增或编辑家庭成员）
-function MemberForm({
-  initial,
-  showNameField,
-  onSave,
-  saving,
-}: {
-  initial?: Partial<FamilyMember & Profile>;
-  showNameField?: boolean;
-  onSave: (data: any) => void;
-  saving: boolean;
-}) {
-  const [name, setName] = useState(initial?.name ?? '');
-  const [relation, setRelation] = useState(initial?.relation ?? '');
-  const [gender, setGender] = useState<Gender | undefined>(initial?.gender);
-  const [birthYear, setBirthYear] = useState(
-    initial?.birth_date ? initial.birth_date.slice(0, 4) : ''
-  );
-  const [height, setHeight] = useState(initial?.height_cm ? String(initial.height_cm) : '');
-  const [weight, setWeight] = useState(initial?.weight_kg ? String(initial.weight_kg) : '');
-  const [activityLevel, setActivityLevel] = useState<ActivityLevel | undefined>(
-    initial?.activity_level
-  );
-  const [goal, setGoal] = useState<Goal | undefined>(initial?.goal);
-
-  function handleSubmit() {
-    if (!gender || !height || !weight || !activityLevel || !goal) {
-      Alert.alert('提示', '请完整填写信息');
-      return;
-    }
-    onSave({
-      name: name || undefined,
-      relation: relation || undefined,
-      gender,
-      birth_date: birthYear ? `${birthYear}-01-01` : undefined,
-      height_cm: parseFloat(height),
-      weight_kg: parseFloat(weight),
-      activity_level: activityLevel,
-      goal,
-    });
-  }
-
-  return (
-    <ScrollView>
-      {showNameField && (
-        <>
-          <Text style={styles.label}>称呼</Text>
-          <TextInput style={styles.input} placeholder="例如：妈妈、小明" value={name} onChangeText={setName} />
-          <Text style={styles.label}>关系</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="例如：配偶、子女、父母"
-            value={relation}
-            onChangeText={setRelation}
-          />
-        </>
-      )}
-
-      <Text style={styles.label}>性别</Text>
-      <Chip options={GENDER_OPTIONS} selected={gender} onSelect={setGender} />
-
-      <Text style={styles.label}>出生年份</Text>
-      <TextInput
-        style={styles.input}
-        placeholder="例如 1995"
-        keyboardType="number-pad"
-        maxLength={4}
-        value={birthYear}
-        onChangeText={setBirthYear}
-      />
-
-      <Text style={styles.label}>身高 (cm)</Text>
-      <TextInput
-        style={styles.input}
-        keyboardType="decimal-pad"
-        value={height}
-        onChangeText={setHeight}
-      />
-
-      <Text style={styles.label}>体重 (kg)</Text>
-      <TextInput
-        style={styles.input}
-        keyboardType="decimal-pad"
-        value={weight}
-        onChangeText={setWeight}
-      />
-
-      <Text style={styles.label}>活动水平</Text>
-      <Chip options={ACTIVITY_OPTIONS} selected={activityLevel} onSelect={setActivityLevel} />
-
-      <Text style={styles.label}>目标</Text>
-      <Chip options={GOAL_OPTIONS} selected={goal} onSelect={setGoal} />
-
-      <TouchableOpacity style={styles.saveButton} onPress={handleSubmit} disabled={saving}>
-        {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveButtonText}>保存</Text>}
-      </TouchableOpacity>
-    </ScrollView>
-  );
-}
+import { calculateBmi } from '../lib/bmiUtils';
+import { requestWearablePermissions, syncWearableData } from '../lib/wearableSync';
+import { FamilyMember, Profile } from '../types';
+import { MemberForm } from '../components/MemberForm';
 
 export default function ProfileScreen() {
   const session = useAppStore((s) => s.session);
@@ -173,6 +26,7 @@ export default function ProfileScreen() {
   const setFamilyMembers = useAppStore((s) => s.setFamilyMembers);
   const activeMemberId = useAppStore((s) => s.activeMemberId);
   const setActiveMemberId = useAppStore((s) => s.setActiveMemberId);
+  const activePlan = useAppStore((s) => s.activePlan);
   const setActivePlan = useAppStore((s) => s.setActivePlan);
 
   const [editSelfVisible, setEditSelfVisible] = useState(false);
@@ -180,6 +34,7 @@ export default function ProfileScreen() {
   const [editMember, setEditMember] = useState<FamilyMember | null>(null);
   const [saving, setSaving] = useState(false);
   const [streak, setStreak] = useState(0);
+  const [syncingWearable, setSyncingWearable] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -189,6 +44,23 @@ export default function ProfileScreen() {
     }, [session])
   );
 
+  async function handleSyncWearable() {
+    if (!session?.user?.id) return;
+    setSyncingWearable(true);
+    const granted = await requestWearablePermissions();
+    if (!granted) {
+      Alert.alert(
+        '暂时无法同步',
+        '可穿戴设备数据接入需要自定义开发版本才能使用（当前在 Expo Go 中运行，此功能暂不可用），详见 README 说明。'
+      );
+      setSyncingWearable(false);
+      return;
+    }
+    const count = await syncWearableData(session.user.id);
+    setSyncingWearable(false);
+    Alert.alert('同步完成', `已同步 ${count} 条数据`);
+  }
+
   async function saveSelfProfile(data: Partial<Profile>) {
     if (!session?.user?.id) return;
     setSaving(true);
@@ -196,12 +68,23 @@ export default function ProfileScreen() {
       .from('profiles')
       .update(data)
       .eq('id', session.user.id);
-    setSaving(false);
+
     if (error) {
+      setSaving(false);
       Alert.alert('保存失败', error.message);
       return;
     }
-    setProfile({ ...profile, ...data, id: session.user.id } as Profile);
+
+    const updatedProfile = { ...profile, ...data, id: session.user.id } as Profile;
+    setProfile(updatedProfile);
+
+    // 身高体重等信息变了，摄入目标也要跟着重新计算，不用等12天的自动评估
+    const newPlan = await regeneratePlan(session.user.id, null, updatedProfile);
+    if (newPlan && activeMemberId === null) {
+      setActivePlan(newPlan);
+    }
+
+    setSaving(false);
     setEditSelfVisible(false);
   }
 
@@ -220,37 +103,39 @@ export default function ProfileScreen() {
       return;
     }
 
-    // 新增家庭成员时，立即基于其信息生成一份初始营养方案，无需单独走一遍onboarding流程
-    const plan = generateInitialPlan(inserted as any);
-    const { error: planError } = await supabase.from('nutrition_plans').insert({
-      user_id: session.user.id,
-      family_member_id: inserted.id,
-      ...plan,
-    });
-
+    const newPlan = await regeneratePlan(session.user.id, inserted.id, inserted as any, '');
     setSaving(false);
-    if (planError) {
-      Alert.alert('方案生成失败', planError.message);
+    if (!newPlan) {
+      Alert.alert('方案生成失败', '请稍后在首页手动重新评估');
     }
     setFamilyMembers([...familyMembers, inserted]);
     setAddMemberVisible(false);
   }
 
   async function saveEditedMember(data: Partial<FamilyMember>) {
-    if (!editMember) return;
+    if (!editMember || !session?.user?.id) return;
     setSaving(true);
     const { error } = await supabase
       .from('family_members')
       .update(data)
       .eq('id', editMember.id);
-    setSaving(false);
+
     if (error) {
+      setSaving(false);
       Alert.alert('保存失败', error.message);
       return;
     }
-    setFamilyMembers(
-      familyMembers.map((m) => (m.id === editMember.id ? { ...m, ...data } : m))
-    );
+
+    const updatedMember = { ...editMember, ...data };
+    setFamilyMembers(familyMembers.map((m) => (m.id === editMember.id ? updatedMember : m)));
+
+    // 同样，家庭成员的信息更新后也要重新生成方案
+    const newPlan = await regeneratePlan(session.user.id, editMember.id, updatedMember as any);
+    if (newPlan && activeMemberId === editMember.id) {
+      setActivePlan(newPlan);
+    }
+
+    setSaving(false);
     setEditMember(null);
   }
 
@@ -293,58 +178,85 @@ export default function ProfileScreen() {
     await supabase.auth.signOut();
   }
 
+  const selfBmi =
+    profile?.height_cm && profile?.weight_kg
+      ? calculateBmi(profile.weight_kg, profile.height_cm)
+      : null;
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 60 }}>
       <Text style={styles.sectionTitle}>我的信息</Text>
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>本人</Text>
-        <Text style={styles.cardMeta}>
-          {profile?.gender === 'male' ? '男' : profile?.gender === 'female' ? '女' : '未填写'} ·{' '}
-          {profile?.height_cm ?? '--'}cm · {profile?.weight_kg ?? '--'}kg
-        </Text>
-        <View style={styles.cardActions}>
-          <TouchableOpacity onPress={() => setEditSelfVisible(true)}>
-            <Text style={styles.linkText}>编辑资料</Text>
-          </TouchableOpacity>
-          {activeMemberId !== null && (
-            <TouchableOpacity onPress={() => handleSwitchMember(null)}>
-              <Text style={styles.linkText}>查看本人数据</Text>
-            </TouchableOpacity>
-          )}
-          {activeMemberId === null && <Text style={styles.currentTag}>当前查看中</Text>}
+      <Text style={styles.hint}>点击整行可以切换首页查看的对象</Text>
+
+      <TouchableOpacity
+        style={[styles.card, activeMemberId === null && styles.cardActive]}
+        onPress={() => handleSwitchMember(null)}
+        activeOpacity={0.8}
+      >
+        <View style={{ flex: 1 }}>
+          <Text style={styles.cardTitle}>本人</Text>
+          <Text style={styles.cardMeta}>
+            {profile?.gender === 'male' ? '男' : profile?.gender === 'female' ? '女' : '未填写'} ·{' '}
+            {profile?.height_cm ?? '--'}cm · {profile?.weight_kg ?? '--'}kg
+            {selfBmi ? ` · BMI ${selfBmi.bmi} (${selfBmi.label})` : ''}
+          </Text>
         </View>
-      </View>
+        <View style={styles.cardActions}>
+          <TouchableOpacity onPress={() => setEditSelfVisible(true)} hitSlop={8}>
+            <Text style={styles.linkText}>编辑</Text>
+          </TouchableOpacity>
+          {activeMemberId === null && <Text style={styles.currentTag}>✓ 查看中</Text>}
+        </View>
+      </TouchableOpacity>
 
       <Text style={styles.sectionTitle}>家庭成员</Text>
-      {familyMembers.map((member) => (
-        <View key={member.id} style={styles.card}>
-          <Text style={styles.cardTitle}>
-            {member.name} {member.relation ? `· ${member.relation}` : ''}
-          </Text>
-          <Text style={styles.cardMeta}>
-            {member.gender === 'male' ? '男' : '女'} · {member.height_cm}cm · {member.weight_kg}kg
-          </Text>
-          <View style={styles.cardActions}>
-            <TouchableOpacity onPress={() => setEditMember(member)}>
-              <Text style={styles.linkText}>编辑</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => handleDeleteMember(member)}>
-              <Text style={[styles.linkText, { color: '#C0392B' }]}>删除</Text>
-            </TouchableOpacity>
-            {activeMemberId !== member.id ? (
-              <TouchableOpacity onPress={() => handleSwitchMember(member.id)}>
-                <Text style={styles.linkText}>查看TA的数据</Text>
+      {familyMembers.map((member) => {
+        const memberBmi =
+          member.height_cm && member.weight_kg
+            ? calculateBmi(member.weight_kg, member.height_cm)
+            : null;
+        return (
+          <TouchableOpacity
+            key={member.id}
+            style={[styles.card, activeMemberId === member.id && styles.cardActive]}
+            onPress={() => handleSwitchMember(member.id)}
+            activeOpacity={0.8}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={styles.cardTitle}>
+                {member.name} {member.relation ? `· ${member.relation}` : ''}
+              </Text>
+              <Text style={styles.cardMeta}>
+                {member.gender === 'male' ? '男' : '女'} · {member.height_cm}cm · {member.weight_kg}kg
+                {memberBmi ? ` · BMI ${memberBmi.bmi} (${memberBmi.label})` : ''}
+              </Text>
+            </View>
+            <View style={styles.cardActions}>
+              <TouchableOpacity onPress={() => setEditMember(member)} hitSlop={8}>
+                <Text style={styles.linkText}>编辑</Text>
               </TouchableOpacity>
-            ) : (
-              <Text style={styles.currentTag}>当前查看中</Text>
-            )}
-          </View>
-        </View>
-      ))}
+              <TouchableOpacity onPress={() => handleDeleteMember(member)} hitSlop={8}>
+                <Text style={[styles.linkText, { color: '#C0392B' }]}>删除</Text>
+              </TouchableOpacity>
+              {activeMemberId === member.id && <Text style={styles.currentTag}>✓ 查看中</Text>}
+            </View>
+          </TouchableOpacity>
+        );
+      })}
 
       <TouchableOpacity style={styles.addMemberButton} onPress={() => setAddMemberVisible(true)}>
         <Text style={styles.addMemberButtonText}>+ 添加家庭成员</Text>
       </TouchableOpacity>
+
+      <Text style={styles.sectionTitle}>可穿戴设备</Text>
+      <View style={styles.card}>
+        <Text style={styles.cardMeta}>
+          连接 Apple Health / Health Connect 后可自动同步体重和消耗数据（需要自定义开发版本才能使用，详见项目 README）
+        </Text>
+        <TouchableOpacity onPress={handleSyncWearable} disabled={syncingWearable} style={{ marginTop: 10 }}>
+          <Text style={styles.linkText}>{syncingWearable ? '同步中...' : '⌚ 立即同步'}</Text>
+        </TouchableOpacity>
+      </View>
 
       <Text style={styles.sectionTitle}>成就徽章</Text>
       <View style={styles.badgeRow}>
@@ -408,13 +320,23 @@ export default function ProfileScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F4F8F4', padding: 20 },
-  sectionTitle: { fontSize: 16, fontWeight: '700', color: '#1F2D26', marginTop: 20, marginBottom: 10 },
-  card: { backgroundColor: '#fff', borderRadius: 14, padding: 16, marginBottom: 10 },
+  sectionTitle: { fontSize: 16, fontWeight: '700', color: '#1F2D26', marginTop: 20, marginBottom: 6 },
+  hint: { fontSize: 12, color: '#8A9990', marginBottom: 10 },
+  card: {
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 10,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  cardActive: { borderWidth: 1.5, borderColor: '#2E7D5B' },
   cardTitle: { fontSize: 15, fontWeight: '700', color: '#1F2D26' },
-  cardMeta: { fontSize: 13, color: '#6B7C74', marginTop: 4, marginBottom: 10 },
-  cardActions: { flexDirection: 'row', gap: 16, flexWrap: 'wrap' },
+  cardMeta: { fontSize: 13, color: '#6B7C74', marginTop: 4 },
+  cardActions: { alignItems: 'flex-end', gap: 8 },
   linkText: { fontSize: 13, color: '#2E7D5B', fontWeight: '600' },
-  currentTag: { fontSize: 12, color: '#8A9990' },
+  currentTag: { fontSize: 11, color: '#2E7D5B', fontWeight: '700' },
   addMemberButton: {
     borderWidth: 1,
     borderColor: '#2E7D5B',
@@ -436,35 +358,4 @@ const styles = StyleSheet.create({
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
   modalTitle: { fontSize: 18, fontWeight: '700', color: '#1F2D26' },
   closeText: { color: '#6B7C74', fontSize: 14 },
-  label: { fontSize: 13, fontWeight: '600', color: '#1F2D26', marginTop: 14, marginBottom: 8 },
-  input: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    fontSize: 16,
-    borderWidth: 1,
-    borderColor: '#E2E8E4',
-  },
-  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: {
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    borderRadius: 20,
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#E2E8E4',
-  },
-  chipSelected: { backgroundColor: '#2E7D5B', borderColor: '#2E7D5B' },
-  chipText: { fontSize: 13, color: '#4A5A52' },
-  chipTextSelected: { color: '#fff', fontWeight: '600' },
-  saveButton: {
-    backgroundColor: '#2E7D5B',
-    borderRadius: 12,
-    paddingVertical: 15,
-    alignItems: 'center',
-    marginTop: 24,
-    marginBottom: 40,
-  },
-  saveButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
 });
