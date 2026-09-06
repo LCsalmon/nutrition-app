@@ -15,7 +15,6 @@ import { supabase } from '../lib/supabase';
 import { useAppStore } from '../lib/store';
 import { generateInitialPlan } from '../lib/nutritionEngine';
 import { calculateLoggingStreak, getStreakBadges } from '../lib/behaviorSupport';
-import { generateInitialPlan } from '../lib/nutritionEngine';
 import { ActivityLevel, FamilyMember, Gender, Goal, Profile } from '../types';
 
 const GENDER_OPTIONS: { value: Gender; label: string }[] = [
