@@ -55,7 +55,21 @@ iOS 还需要：
 
 在完成以上构建之前，首页点击"同步"按钮会提示暂不可用，这是预期行为，不是bug。
 
-## 尚未实现（后续迭代方向）
+## 数据库改动 / Supabase GitHub 集成说明
+
+数据库结构文件现在统一放在 `supabase/migrations/` 目录下（Supabase 官方规范的位置），文件名带时间戳前缀，按顺序执行：
+
+- `20240101000001_initial_schema.sql` —— 基础表结构（用户资料/方案/食物库/打卡/体重）
+- `20240102000001_family_members.sql` —— 家庭成员支持
+
+**这两个文件都写成了"幂等"的（可以安全重复执行，不会因为表/字段已存在而报错）**，所以：
+
+- 如果你是全新的 Supabase 项目，直接在 SQL Editor 里按顺序各跑一次即可
+- 如果你之前已经手动跑过旧版本、遇到过 "already exists" 报错、或者中途删过什么表，**直接重新完整跑一遍这两个文件也是安全的**，不会因为部分对象已存在而中断
+
+如果你在 Supabase 项目里连了 GitHub 集成（Project Settings → Integrations → GitHub），它会识别这个 `supabase/migrations/` 目录，之后我这边如果要改数据库结构，会新增一个新的时间戳文件到这个目录里，push 上去后可以在 Supabase 的集成设置里手动触发运行，或者按它当时展示的方式操作。
+
+⚠️ 已经删除了旧的 `supabase/schema.sql` 和 `supabase/migration_v2_family_members.sql`（非标准位置的历史文件），改用上面 `migrations/` 目录下的新版本，避免大家搞混跑错文件。
 
 - 拍照识别食物 / 语音输入
 - 体检报告上传与OCR风险分级
