@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -14,7 +14,16 @@ import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import { useAppStore } from '../lib/store';
 import { checkAndAdjustPlan } from '../lib/planAdjustment';
+import {
+  calculateLoggingStreak,
+  detectNudges,
+  getStreakBadges,
+  requestNotificationPermission,
+  scheduleDailyReminder,
+  Nudge,
+} from '../lib/behaviorSupport';
 import { FoodLog } from '../types';
+import { requestWearablePermissions, syncWearableData } from '../lib/wearableSync';
 
 function ProgressBar({ value, max, color }: { value: number; max: number; color: string }) {
   const pct = Math.min(value / max, 1) * 100;
@@ -36,6 +45,26 @@ export default function HomeScreen({ navigation }: any) {
   const [weightModalVisible, setWeightModalVisible] = useState(false);
   const [weightInput, setWeightInput] = useState('');
   const [savingWeight, setSavingWeight] = useState(false);
+  const [streak, setStreak] = useState(0);
+  const [nudges, setNudges] = useState<Nudge[]>([]);
+  const [syncingWearable, setSyncingWearable] = useState(false);
+
+  async function handleSyncWearable() {
+    if (!session?.user?.id) return;
+    setSyncingWearable(true);
+    const granted = await requestWearablePermissions();
+    if (!granted) {
+      Alert.alert(
+        '暂时无法同步',
+        '可穿戴设备数据接入需要自定义开发版本才能使用（当前在 Expo Go 中运行，此功能暂不可用），详见 README 说明。'
+      );
+      setSyncingWearable(false);
+      return;
+    }
+    const count = await syncWearableData(session.user.id);
+    setSyncingWearable(false);
+    Alert.alert('同步完成', `已同步 ${count} 条体重记录`);
+  }
 
   async function handleSaveWeight() {
     if (!session?.user?.id || !weightInput) return;
@@ -81,8 +110,19 @@ export default function HomeScreen({ navigation }: any) {
   useFocusEffect(
     useCallback(() => {
       fetchTodayLogs();
-    }, [fetchTodayLogs])
+      if (session?.user?.id) {
+        calculateLoggingStreak(session.user.id).then(setStreak);
+        detectNudges(session.user.id).then(setNudges);
+      }
+    }, [fetchTodayLogs, session])
   );
+
+  // 首次进入首页时请求通知权限并设置每日提醒（用户可在系统设置里随时关闭）
+  useEffect(() => {
+    requestNotificationPermission().then((granted) => {
+      if (granted) scheduleDailyReminder(20, 0);
+    });
+  }, []);
 
   async function onRefresh() {
     setRefreshing(true);
@@ -114,6 +154,18 @@ export default function HomeScreen({ navigation }: any) {
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
     >
       <Text style={styles.greeting}>今日概览</Text>
+
+      {streak > 0 && (
+        <View style={styles.streakBadge}>
+          <Text style={styles.streakText}>🔥 已连续打卡 {streak} 天</Text>
+        </View>
+      )}
+
+      {nudges.map((nudge) => (
+        <View key={nudge.id} style={styles.nudgeCard}>
+          <Text style={styles.nudgeText}>{nudge.message}</Text>
+        </View>
+      ))}
 
       <View style={styles.calorieCard}>
         <Text style={styles.calorieValue}>
@@ -147,6 +199,16 @@ export default function HomeScreen({ navigation }: any) {
           <Text style={styles.weightButtonText}>+ 记录体重</Text>
         </TouchableOpacity>
       </View>
+
+      <TouchableOpacity
+        style={styles.wearableSyncLink}
+        onPress={handleSyncWearable}
+        disabled={syncingWearable}
+      >
+        <Text style={styles.wearableSyncText}>
+          {syncingWearable ? '同步中...' : '⌚ 从 Apple Health / Health Connect 同步数据'}
+        </Text>
+      </TouchableOpacity>
 
       <Modal visible={weightModalVisible} transparent animationType="fade">
         <View style={styles.modalOverlay}>
@@ -187,6 +249,21 @@ export default function HomeScreen({ navigation }: any) {
             {evaluating ? '评估中...' : '立即重新评估我的方案 →'}
           </Text>
         </TouchableOpacity>
+      </View>
+
+      <Text style={styles.sectionTitle}>成就徽章</Text>
+      <View style={styles.badgeRow}>
+        {getStreakBadges(streak).map((badge) => (
+          <View
+            key={badge.id}
+            style={[styles.badgeChip, badge.earned && styles.badgeChipEarned]}
+          >
+            <Text style={[styles.badgeText, badge.earned && styles.badgeTextEarned]}>
+              {badge.earned ? '🏅 ' : '🔒 '}
+              {badge.label}
+            </Text>
+          </View>
+        ))}
       </View>
 
       <Text style={styles.sectionTitle}>今日已记录</Text>
@@ -233,6 +310,22 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F4F8F4', padding: 20 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   greeting: { fontSize: 22, fontWeight: '700', color: '#1F2D26', marginBottom: 16 },
+  streakBadge: {
+    backgroundColor: '#FFF3E0',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    marginBottom: 12,
+    alignSelf: 'flex-start',
+  },
+  streakText: { fontSize: 13, fontWeight: '700', color: '#B5651D' },
+  nudgeCard: {
+    backgroundColor: '#FEF3F0',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 12,
+  },
+  nudgeText: { fontSize: 13, color: '#B5432E', lineHeight: 19 },
   calorieCard: {
     backgroundColor: '#fff',
     borderRadius: 16,
@@ -276,6 +369,8 @@ const styles = StyleSheet.create({
     borderColor: '#2E7D5B',
   },
   weightButtonText: { color: '#2E7D5B', fontSize: 16, fontWeight: '600' },
+  wearableSyncLink: { alignItems: 'center', marginBottom: 20 },
+  wearableSyncText: { fontSize: 13, color: '#6B7C74' },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.4)',
@@ -326,6 +421,16 @@ const styles = StyleSheet.create({
   explanationText: { fontSize: 13, color: '#3E4F46', lineHeight: 20 },
   evaluateLink: { fontSize: 12, color: '#2E7D5B', fontWeight: '600', marginTop: 10 },
   sectionTitle: { fontSize: 16, fontWeight: '700', color: '#1F2D26', marginBottom: 10 },
+  badgeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 24 },
+  badgeChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 16,
+    backgroundColor: '#F0F0F0',
+  },
+  badgeChipEarned: { backgroundColor: '#FFF3E0' },
+  badgeText: { fontSize: 12, color: '#9AA39D' },
+  badgeTextEarned: { color: '#B5651D', fontWeight: '600' },
   emptyText: { color: '#8A9990', fontSize: 13, marginBottom: 30 },
   logRow: {
     backgroundColor: '#fff',

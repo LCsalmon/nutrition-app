@@ -36,6 +36,24 @@ const GOAL_OPTIONS: { value: Goal; label: string }[] = [
   { value: 'general_wellness', label: '日常养生' },
 ];
 
+const COMMON_ALLERGIES = ['花生', '海鲜', '坚果', '牛奶/乳制品', '鸡蛋', '麸质/小麦', '大豆'];
+
+const DIETARY_PREFERENCE_OPTIONS = ['无特殊偏好', '素食', '清真', '低碳水', '高蛋白', '无乳糖'];
+
+const COOKING_TIME_OPTIONS: { value: string; label: string }[] = [
+  { value: 'none', label: '基本不做饭' },
+  { value: '<30min', label: '30分钟以内' },
+  { value: '30-60min', label: '30-60分钟' },
+  { value: '>60min', label: '60分钟以上' },
+];
+
+const EATING_OUT_OPTIONS: { value: string; label: string }[] = [
+  { value: 'rarely', label: '很少外食' },
+  { value: 'sometimes', label: '偶尔外食' },
+  { value: 'often', label: '经常外食' },
+  { value: 'mostly', label: '几乎都外食' },
+];
+
 function OptionRow<T extends string>({
   options,
   selected,
@@ -67,6 +85,37 @@ function OptionRow<T extends string>({
   );
 }
 
+function MultiOptionRow({
+  options,
+  selected,
+  onToggle,
+}: {
+  options: string[];
+  selected: string[];
+  onToggle: (v: string) => void;
+}) {
+  return (
+    <View style={styles.optionRow}>
+      {options.map((opt) => (
+        <TouchableOpacity
+          key={opt}
+          style={[styles.optionChip, selected.includes(opt) && styles.optionChipSelected]}
+          onPress={() => onToggle(opt)}
+        >
+          <Text
+            style={[
+              styles.optionChipText,
+              selected.includes(opt) && styles.optionChipTextSelected,
+            ]}
+          >
+            {opt}
+          </Text>
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
+}
+
 export default function OnboardingScreen({ onDone }: { onDone: () => void }) {
   const session = useAppStore((s) => s.session);
   const [gender, setGender] = useState<Gender>();
@@ -75,7 +124,18 @@ export default function OnboardingScreen({ onDone }: { onDone: () => void }) {
   const [weight, setWeight] = useState('');
   const [activityLevel, setActivityLevel] = useState<ActivityLevel>();
   const [goal, setGoal] = useState<Goal>();
+  const [allergies, setAllergies] = useState<string[]>([]);
+  const [dietaryPreference, setDietaryPreference] = useState<string>();
+  const [cookingTime, setCookingTime] = useState<string>();
+  const [eatingOutFrequency, setEatingOutFrequency] = useState<string>();
+  const [region, setRegion] = useState('');
   const [loading, setLoading] = useState(false);
+
+  function toggleAllergy(item: string) {
+    setAllergies((prev) =>
+      prev.includes(item) ? prev.filter((a) => a !== item) : [...prev, item]
+    );
+  }
 
   async function handleSubmit() {
     if (!session?.user?.id) return;
@@ -96,6 +156,11 @@ export default function OnboardingScreen({ onDone }: { onDone: () => void }) {
         weight_kg: parseFloat(weight),
         activity_level: activityLevel,
         goal,
+        allergies,
+        dietary_preference: dietaryPreference,
+        cooking_time_per_day: cookingTime,
+        eating_out_frequency: eatingOutFrequency,
+        region: region || undefined,
       };
 
       const { error: profileError } = await supabase
@@ -161,6 +226,36 @@ export default function OnboardingScreen({ onDone }: { onDone: () => void }) {
       <Text style={styles.label}>核心目标</Text>
       <OptionRow options={GOAL_OPTIONS} selected={goal} onSelect={setGoal} />
 
+      <Text style={styles.sectionDivider}>为了让方案更贴合你的生活习惯</Text>
+
+      <Text style={styles.label}>过敏原（可多选，没有可跳过）</Text>
+      <MultiOptionRow options={COMMON_ALLERGIES} selected={allergies} onToggle={toggleAllergy} />
+
+      <Text style={styles.label}>饮食偏好</Text>
+      <OptionRow
+        options={DIETARY_PREFERENCE_OPTIONS.map((v) => ({ value: v, label: v }))}
+        selected={dietaryPreference}
+        onSelect={setDietaryPreference}
+      />
+
+      <Text style={styles.label}>每天大概能花多少时间做饭</Text>
+      <OptionRow options={COOKING_TIME_OPTIONS} selected={cookingTime} onSelect={setCookingTime} />
+
+      <Text style={styles.label}>外食频率</Text>
+      <OptionRow
+        options={EATING_OUT_OPTIONS}
+        selected={eatingOutFrequency}
+        onSelect={setEatingOutFrequency}
+      />
+
+      <Text style={styles.label}>所在地区（方便推荐符合当地口味的食物，选填）</Text>
+      <TextInput
+        style={styles.input}
+        placeholder="例如：吉隆坡 / 华南 / 华北"
+        value={region}
+        onChangeText={setRegion}
+      />
+
       <TouchableOpacity style={styles.button} onPress={handleSubmit} disabled={loading}>
         {loading ? (
           <ActivityIndicator color="#fff" />
@@ -196,6 +291,13 @@ const styles = StyleSheet.create({
     color: '#1F2D26',
     marginTop: 18,
     marginBottom: 8,
+  },
+  sectionDivider: {
+    fontSize: 13,
+    color: '#8A9990',
+    marginTop: 28,
+    marginBottom: 4,
+    fontWeight: '600',
   },
   input: {
     backgroundColor: '#fff',

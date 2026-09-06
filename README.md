@@ -27,21 +27,40 @@
 3. 首页看到今日热量和三大营养素进度
 4. 点击"记录一餐" → 搜索食物 → 选择分量 → 保存
 
-## 已实现功能（MVP v1）
+## 已实现功能（更新至 v3）
 
 - 邮箱注册/登录（Supabase Auth）
-- 基础信息采集 + 初始方案生成（Mifflin-St Jeor 公式计算BMR/TDEE，按目标动态调整宏量营养素比例）
-- 食物数据库搜索 + 每日饮食打卡
-- 今日营养摄入 vs 目标 的进度展示
+- 基础信息采集（含过敏原/饮食偏好/做饭时间/外食频率/地区）+ 初始方案生成
+- 食物数据库搜索（本地库 + USDA FoodData Central，自动缓存）+ 每日饮食打卡
+- 方案自动动态调整（App启动时检查，约12天评估一次，可手动触发测试）
+- 体重记录
+- 行为改变支持：每日打卡提醒（本地通知）、连续打卡streak、成就徽章、执行障碍微干预提示
+- 可穿戴设备数据接入代码框架（iOS HealthKit / Android Health Connect）
 
-## 尚未实现（后续迭代方向，对应原始PRD）
+## 关于可穿戴设备功能的重要说明
+
+`react-native-health` 和 `react-native-health-connect` 是原生模块，**无法在 Expo Go 里运行**。
+要真正测试这个功能，需要先构建"自定义开发版本"：
+
+```bash
+npx expo prebuild
+npx expo run:ios       # 需要 Mac + Xcode（或用 EAS Build 云端编译，见下方）
+npx expo run:android   # 需要 Android Studio（或用 EAS Build 云端编译）
+```
+
+iOS 还需要：
+1. 有 Apple Developer 账号（$99/年）
+2. 在 `app.json` 里补充 bundle identifier 对应的 HealthKit Capability 配置
+3. 云端编译可用 `eas build --platform ios --profile development`
+
+在完成以上构建之前，首页点击"同步"按钮会提示暂不可用，这是预期行为，不是bug。
+
+## 尚未实现（后续迭代方向）
 
 - 拍照识别食物 / 语音输入
-- 可穿戴设备数据接入（Apple Health / Google Fit）
-- 方案的自动动态调整逻辑（目前仅生成初始方案，尚无每1-2周自动微调的定时任务）
 - 体检报告上传与OCR风险分级
-- 真人营养师/食疗师咨询模块
-- 行为改变提醒与教育内容
+- 真人营养师/食疗师咨询模块（需要先确定支付方案）
+- 教育内容模块
 
 ## 打包发布到 App Store / Google Play
 
