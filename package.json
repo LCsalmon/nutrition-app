@@ -25,7 +25,8 @@
     "expo-notifications": "~0.28.0",
     "expo-device": "~6.0.0",
     "react-native-health": "^1.19.0",
-    "react-native-health-connect": "^3.2.1"
+    "react-native-health-connect": "^3.2.1",
+    "expo-image-picker": "~15.0.7"
   },
   "devDependencies": {
     "@babel/core": "^7.24.0",

@@ -5,6 +5,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import HomeScreen from '../screens/HomeScreen';
 import LogFoodScreen from '../screens/LogFoodScreen';
 import ProfileScreen from '../screens/ProfileScreen';
+import HealthReportScreen from '../screens/HealthReportScreen';
 import MemberSwitcherModal from '../components/MemberSwitcherModal';
 import { useAppStore } from '../lib/store';
 
@@ -12,6 +13,7 @@ export type RootStackParamList = {
   Home: undefined;
   LogFood: undefined;
   Profile: undefined;
+  HealthReport: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -43,6 +45,11 @@ export default function AppNavigator() {
           options={{ title: '记录一餐' }}
         />
         <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: '我的' }} />
+        <Stack.Screen
+          name="HealthReport"
+          component={HealthReportScreen}
+          options={{ title: '体检报告' }}
+        />
       </Stack.Navigator>
       {/* 挂载在导航容器顶层，任何页面点右上角👤都能唤起，切换后自动生效 */}
       <MemberSwitcherModal />

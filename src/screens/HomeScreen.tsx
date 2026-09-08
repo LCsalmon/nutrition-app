@@ -268,6 +268,13 @@ export default function HomeScreen({ navigation }: any) {
         </TouchableOpacity>
       </View>
 
+      <TouchableOpacity
+        style={styles.healthReportLink}
+        onPress={() => navigation.navigate('HealthReport')}
+      >
+        <Text style={styles.healthReportLinkText}>📋 上传体检报告，看看指标是否正常</Text>
+      </TouchableOpacity>
+
       <Modal visible={weightModalVisible} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
@@ -466,6 +473,16 @@ const styles = StyleSheet.create({
     borderColor: '#2E7D5B',
   },
   weightButtonText: { color: '#2E7D5B', fontSize: 16, fontWeight: '600' },
+  healthReportLink: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#E2E8E4',
+  },
+  healthReportLinkText: { color: '#4A5A52', fontSize: 13, fontWeight: '600' },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.4)',
